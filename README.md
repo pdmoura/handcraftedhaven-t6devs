@@ -266,7 +266,7 @@ Then open a **Pull Request** on GitHub → teammate reviews → merge into `main
 | 25 | [issue-25.md](./docs/issues/issue-25.md) | Dashboard Profile & Sell Pages |
 
 
-Team members
+# Team members
 | Name | Github |
 |---|---|
 | Imelda Lucia Robles Fuentes | [imeldaty](https://github.com/imeldaty) |
