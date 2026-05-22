@@ -18,25 +18,18 @@
 import { Search, X } from 'lucide-react';
 import { useState, useCallback, useEffect } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
+import { useDebounce } from 'use-debounce';
 
 export default function SearchBar({ placeholder = 'Search handcrafted products...', className = '' }) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [query, setQuery] = useState(searchParams.get('search') || '');
-  const [debouncedQuery, setDebouncedQuery] = useState(searchParams.get('search') || '');
+  const [debouncedQuery] = useDebounce(query, 500);
 
   // Update local query state when URL changes externally
   useEffect(() => {
     setQuery(searchParams.get('search') || '');
   }, [searchParams]);
-
-  // Debounce the input query
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      setDebouncedQuery(query);
-    }, 500);
-    return () => clearTimeout(timer);
-  }, [query]);
 
   // Trigger search when debounced query changes
   useEffect(() => {
@@ -140,32 +133,23 @@ export default function SortDropdown({ initialSort }) {
 
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useState, useEffect } from 'react';
+import { useDebounce } from 'use-debounce';
 
 export default function RatingSlider({ initialRating = 0 }) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [rating, setRating] = useState(initialRating);
-  const [debouncedRating, setDebouncedRating] = useState(initialRating);
+  const [debouncedRating] = useDebounce(rating, 400);
 
   // Sync state with URL params
   useEffect(() => {
     const minRating = searchParams.get('minRating');
     if (minRating) {
       setRating(Number(minRating));
-      setDebouncedRating(Number(minRating));
     } else {
       setRating(0);
-      setDebouncedRating(0);
     }
   }, [searchParams]);
-
-  // Debounce rating changes
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      setDebouncedRating(rating);
-    }, 400);
-    return () => clearTimeout(timer);
-  }, [rating]);
 
   // Push to router when debounced rating changes
   useEffect(() => {

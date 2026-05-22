@@ -304,17 +304,6 @@ export function getInitials(name) {
 }
 
 /**
- * Debounce a function
- */
-export function debounce(func, wait) {
-  let timeout;
-  return (...args) => {
-    clearTimeout(timeout);
-    timeout = setTimeout(() => func(...args), wait);
-  };
-}
-
-/**
  * Class name helper — joins truthy values
  */
 export function cn(...classes) {
