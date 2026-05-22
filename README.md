@@ -115,6 +115,7 @@ handcraftedhaven-t6devs/
 │   │   │   ├── LovedThisWeekCarousel.jsx
 │   │   │   ├── MobileMenu.jsx
 │   │   │   ├── Pagination.jsx
+│   │   │   ├── PriceFilter.jsx
 │   │   │   ├── ProductCard.jsx
 │   │   │   ├── QuantitySelector.jsx
 │   │   │   ├── RatingSlider.jsx
@@ -129,6 +130,7 @@ handcraftedhaven-t6devs/
 │   ├── lib/
 │   │   ├── auth.js
 │   │   ├── prisma.js
+│   │   ├── rateLimit.js
 │   │   ├── utils.js
 │   │   └── actions/
 │   │       ├── auth.js
