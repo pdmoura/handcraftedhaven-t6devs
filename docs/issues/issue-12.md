@@ -1,13 +1,105 @@
 # Issue 12 — Auth Server Actions
 
-**Labels:** `feature`, `backend` | **Priority:** 🔴 Critical | **Depends on:** Issue 04
+**Labels:** `feature`, `backend`, `security` | **Priority:** 🔴 Critical | **Depends on:** Issue 04
 
 ## Checklist
+- [ ] Create `src/lib/rateLimit.js`
 - [ ] Create `src/lib/actions/auth.js`
 
-## File to Create
+## Files to Create
 
-### `src/lib/actions/auth.js`
+### File 1 — `src/lib/rateLimit.js`
+
+> In-memory sliding-window rate limiter. Prevents brute-force attacks on login.
+> Keyed by identifier (e.g. email). No external dependencies.
+
+```js
+// ==============================
+// In-Memory Rate Limiter (Sliding Window)
+// ==============================
+// Prevents brute-force attacks on login/register.
+// Keyed by identifier (e.g. email). No external dependencies.
+// NOTE: This resets on server restart and is per-process only.
+// For multi-instance deployments, use Redis-backed rate limiting.
+
+const attempts = new Map();
+
+const DEFAULT_OPTIONS = {
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  maxAttempts: 5,            // max 5 failed attempts per window
+};
+
+/**
+ * Check if an identifier has exceeded the rate limit.
+ * @param {string} identifier - The key to rate limit (e.g. email address)
+ * @param {object} [options] - Override defaults
+ * @returns {{ limited: boolean, remaining: number, retryAfterMs: number }}
+ */
+export function checkRateLimit(identifier, options = {}) {
+  const { windowMs, maxAttempts } = { ...DEFAULT_OPTIONS, ...options };
+  const now = Date.now();
+  const key = identifier.toLowerCase().trim();
+
+  // Get or create entry
+  let entry = attempts.get(key);
+  if (!entry) {
+    entry = { timestamps: [] };
+    attempts.set(key, entry);
+  }
+
+  // Remove timestamps outside the current window
+  entry.timestamps = entry.timestamps.filter((ts) => now - ts < windowMs);
+
+  const remaining = Math.max(0, maxAttempts - entry.timestamps.length);
+  const limited = entry.timestamps.length >= maxAttempts;
+  const oldestInWindow = entry.timestamps[0] || now;
+  const retryAfterMs = limited ? windowMs - (now - oldestInWindow) : 0;
+
+  return { limited, remaining, retryAfterMs };
+}
+
+/**
+ * Record a failed attempt for an identifier.
+ * Call this AFTER a failed login, not on success.
+ * @param {string} identifier
+ */
+export function recordFailedAttempt(identifier) {
+  const key = identifier.toLowerCase().trim();
+  let entry = attempts.get(key);
+  if (!entry) {
+    entry = { timestamps: [] };
+    attempts.set(key, entry);
+  }
+  entry.timestamps.push(Date.now());
+}
+
+/**
+ * Clear all attempts for an identifier (call on successful login).
+ * @param {string} identifier
+ */
+export function clearAttempts(identifier) {
+  attempts.delete(identifier.toLowerCase().trim());
+}
+
+// Periodic cleanup to prevent memory leaks (every 10 minutes)
+if (typeof setInterval !== 'undefined') {
+  setInterval(() => {
+    const now = Date.now();
+    for (const [key, entry] of attempts) {
+      entry.timestamps = entry.timestamps.filter(
+        (ts) => now - ts < DEFAULT_OPTIONS.windowMs
+      );
+      if (entry.timestamps.length === 0) {
+        attempts.delete(key);
+      }
+    }
+  }, 10 * 60 * 1000);
+}
+```
+
+---
+
+### File 2 — `src/lib/actions/auth.js`
 
 ```js
 'use server';
@@ -22,13 +114,14 @@ import {
   COOKIE_NAME,
 } from '@/lib/auth';
 import { isValidEmail, isStrongPassword } from '@/lib/utils';
+import { checkRateLimit, recordFailedAttempt, clearAttempts } from '@/lib/rateLimit';
 import { revalidatePath } from 'next/cache';
 
 const COOKIE_OPTIONS = {
   httpOnly: true,
   secure: process.env.NODE_ENV === 'production',
   sameSite: 'lax',
-  maxAge: 60 * 60 * 24 * 7, // 7 days
+  maxAge: 60 * 60 * 24, // 1 day
   path: '/',
 };
 
@@ -68,18 +161,33 @@ export async function loginAction(email, password) {
       return { success: false, error: 'Email and password are required' };
     }
 
+    // Rate limiting: max 5 failed attempts per email per 15 minutes
+    const rateCheck = checkRateLimit(email);
+    if (rateCheck.limited) {
+      const retryMinutes = Math.ceil(rateCheck.retryAfterMs / 60000);
+      return {
+        success: false,
+        error: `Too many login attempts. Please try again in ${retryMinutes} minute${retryMinutes === 1 ? '' : 's'}.`,
+      };
+    }
+
     const user = await prisma.user.findUnique({
       where: { email },
     });
 
     if (!user) {
+      recordFailedAttempt(email);
       return { success: false, error: 'Invalid email or password' };
     }
 
     const isValid = await comparePassword(password, user.passwordHash);
     if (!isValid) {
+      recordFailedAttempt(email);
       return { success: false, error: 'Invalid email or password' };
     }
+
+    // Successful login — clear rate limit for this email
+    clearAttempts(email);
 
     const token = await signToken({
       id: user.id,
@@ -192,8 +300,17 @@ export async function updateProfileAction(data) {
 
     const { name, email, bio, location, avatarUrl, socialLinks, role } = data;
 
-    if (role && role !== 'seller') {
-      return { success: false, error: 'Invalid role' };
+    // Role escalation guard: only allow buyer → seller promotion.
+    // Sellers cannot downgrade, and arbitrary roles are rejected.
+    // This is intentional: in this marketplace, any buyer can become a seller
+    // by opting in through the profile/sell page. No admin approval required.
+    if (role) {
+      if (role !== 'seller') {
+        return { success: false, error: 'Invalid role' };
+      }
+      if (session.role === 'seller') {
+        return { success: false, error: 'You are already a seller' };
+      }
     }
 
     if (email) {
@@ -212,7 +329,7 @@ export async function updateProfileAction(data) {
         ...(location !== undefined && { location }),
         ...(avatarUrl !== undefined && { avatarUrl }),
         ...(socialLinks !== undefined && { socialLinks }),
-        ...(role === 'seller' && { role }),
+        ...(role === 'seller' && session.role !== 'seller' && { role }),
       },
       select: {
         id: true,

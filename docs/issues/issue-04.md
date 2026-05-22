@@ -1,11 +1,12 @@
-# Issue 04 — Core Libraries (prisma.js, auth.js, utils.js)
+# Issue 04 — Core Libraries (prisma.js, auth.js, utils.js, proxy.js)
 
-**Labels:** `setup`, `backend` | **Priority:** 🔴 Critical | **Depends on:** Issue 03
+**Labels:** `setup`, `backend`, `security` | **Priority:** 🔴 Critical | **Depends on:** Issue 03
 
 ## Checklist
 - [ ] Create `src/lib/prisma.js`
 - [ ] Create `src/lib/auth.js`
 - [ ] Create `src/lib/utils.js`
+- [ ] Create `src/proxy.js` (Next.js 16 route guard — replaces `middleware.js`)
 
 ## Files to Create
 
@@ -46,11 +47,16 @@ import { SignJWT, jwtVerify } from 'jose';
 import { hash, compare } from 'bcryptjs';
 import { cookies } from 'next/headers';
 
-const JWT_SECRET = new TextEncoder().encode(
-  process.env.JWT_SECRET || 'fallback-secret-change-in-production'
-);
+if (!process.env.JWT_SECRET) {
+  throw new Error(
+    'JWT_SECRET environment variable is required. Generate one with: openssl rand -base64 32 or https://generate-secret.vercel.app/32'
+  );
+}
+
+const JWT_SECRET = new TextEncoder().encode(process.env.JWT_SECRET);
+
 const COOKIE_NAME = 'haven_auth_token';
-const TOKEN_EXPIRY = '7d';
+const TOKEN_EXPIRY = '1d';
 const SALT_ROUNDS = 12;
 
 export async function hashPassword(password) {
@@ -96,7 +102,7 @@ export function setAuthCookie(response, token) {
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',
     sameSite: 'lax',
-    maxAge: 60 * 60 * 24 * 7,
+    maxAge: 60 * 60 * 24, // 1 day
     path: '/',
   });
 }
@@ -116,7 +122,98 @@ export { COOKIE_NAME };
 
 ---
 
-### File 3 — `src/lib/utils.js`
+### File 3 — `src/proxy.js`
+
+> Next.js 16 renamed `middleware.js` to `proxy.js`. This file guards routes:
+> - `/cart`, `/checkout`, `/account` — require authentication
+> - `/dashboard` — requires seller role
+> - `/auth/login`, `/auth/register` — redirects authenticated users away
+
+```js
+import { NextResponse } from 'next/server';
+import { jwtVerify } from 'jose';
+
+if (!process.env.JWT_SECRET) {
+  throw new Error(
+    'JWT_SECRET environment variable is required. Generate one with: openssl rand -base64 32'
+  );
+}
+
+const JWT_SECRET = new TextEncoder().encode(process.env.JWT_SECRET);
+
+const COOKIE_NAME = 'haven_auth_token';
+
+// Routes that require authentication
+const AUTH_ROUTES = ['/cart', '/checkout', '/account'];
+
+// Routes that require seller role
+const SELLER_ROUTES = ['/dashboard'];
+
+// Routes that should redirect authenticated users away
+const GUEST_ROUTES = ['/auth/login', '/auth/register'];
+
+export async function proxy(request) {
+  const { pathname } = request.nextUrl;
+  const token = request.cookies.get(COOKIE_NAME)?.value;
+
+  let user = null;
+
+  // Try to verify token if present
+  if (token) {
+    try {
+      const { payload } = await jwtVerify(token, JWT_SECRET);
+      user = payload;
+    } catch {
+      // Token is invalid — clear it
+      const response = NextResponse.next();
+      response.cookies.delete(COOKIE_NAME);
+      return response;
+    }
+  }
+
+  // Redirect authenticated users away from login/register
+  if (user && GUEST_ROUTES.some((route) => pathname.startsWith(route))) {
+    return NextResponse.redirect(new URL('/', request.url));
+  }
+
+  // Check auth-required routes
+  if (AUTH_ROUTES.some((route) => pathname.startsWith(route))) {
+    if (!user) {
+      const loginUrl = new URL('/auth/login', request.url);
+      loginUrl.searchParams.set('redirect', pathname);
+      return NextResponse.redirect(loginUrl);
+    }
+  }
+
+  // Check seller-only routes
+  if (SELLER_ROUTES.some((route) => pathname.startsWith(route))) {
+    if (!user) {
+      const loginUrl = new URL('/auth/login', request.url);
+      loginUrl.searchParams.set('redirect', pathname);
+      return NextResponse.redirect(loginUrl);
+    }
+    if (user.role !== 'seller') {
+      return NextResponse.redirect(new URL('/', request.url));
+    }
+  }
+
+  return NextResponse.next();
+}
+
+export const config = {
+  matcher: [
+    '/cart/:path*',
+    '/checkout/:path*',
+    '/account/:path*',
+    '/dashboard/:path*',
+    '/auth/:path*',
+  ],
+};
+```
+
+---
+
+### File 4 — `src/lib/utils.js`
 
 ```js
 // ==============================

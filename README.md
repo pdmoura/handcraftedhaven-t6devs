@@ -214,7 +214,7 @@ Then open a **Pull Request** on GitHub → teammate reviews → merge into `main
 | 01 | [issue-01.md](./docs/issues/issue-01.md) | Initialize Next.js & Clean Boilerplate |
 | 02 | [issue-02.md](./docs/issues/issue-02.md) | Install Dependencies & Configure Build |
 | 03 | [issue-03.md](./docs/issues/issue-03.md) | Prisma ORM & Database Schema |
-| 04 | [issue-04.md](./docs/issues/issue-04.md) | Core Libraries (prisma.js, auth.js, utils.js) |
+| 04 | [issue-04.md](./docs/issues/issue-04.md) | Core Libraries (prisma.js, auth.js, utils.js, proxy.js) |
 | 05 | [issue-05.md](./docs/issues/issue-05.md) | Design System (globals.css) |
 
 ### EPIC 2 — Providers & Shared UI
